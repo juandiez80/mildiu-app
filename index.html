@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mildiu Trebujena</title>
+
+<style>
+body {
+  font-family: Arial;
+  background: #061012;
+  color: white;
+  text-align: center;
+  padding: 15px;
+}
+
+.card {
+  background: #0f2529;
+  border-radius: 15px;
+  padding: 15px;
+  margin: 10px 0;
+}
+
+.semaforo {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  margin: 10px auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+
+.rojo { background: #ff3b3b; }
+.amarillo { background: #ffd93b; color: black; }
+.verde { background: #2ecc71; }
+
+#accion {
+  font-size: 26px;
+  font-weight: bold;
+}
+
+#exp {
+  font-size: 15px;
+  margin-top: 10px;
+}
+</style>
+</head>
+
+<body>
+
+<h2>🍇 Mildiu Trebujena</h2>
+
+<div class="card">
+<h3>📍 AHORA</h3>
+<p>🌡️ <span id="temp"></span> °C</p>
+<p>💧 <span id="hum"></span> %</p>
+<p>🌧️ <span id="rain"></span></p>
+<div id="semHoy" class="semaforo">--</div>
+</div>
+
+<div class="card">
+<h3>🌤️ MAÑANA</h3>
+<p id="mañanaTxt"></p>
+<div id="semMan" class="semaforo">--</div>
+</div>
+
+<div id="accion"></div>
+<div id="exp"></div>
+
+<script>
+const API_KEY = "ddb12166-d5ae-441d-9695-78446682c8a2";
+const APP_KEY = "30BB41376CB44E4B67B7F86DCAD9031A";
+const MAC = "84:F3:EB:63:F6:54";
+
+const lat = 36.87;
+const lon = -6.18;
+
+// -------- MODELO AFINADO ----------
+function calcular(temp, hum, rain) {
+
+  let riesgo = "BAJO";
+  let motivos = [];
+
+  // 🌧️ LLUVIA
+  if (rain > 1) {
+    riesgo = "ALTO";
+    motivos.push("🌧️ Lluvia suficiente para infección");
+  } 
+  else if (rain > 0.2) {
+    riesgo = "MEDIO";
+    motivos.push("🌦️ Lluvia débil");
+  }
+
+  // 🌫️ ROCÍO REAL (condiciones nocturnas)
+  let rocio = false;
+
+  if (hum > 90 && temp >= 10 && temp <= 20) {
+    rocio = true;
+  }
+
+  if (rocio && riesgo === "BAJO") {
+    riesgo = "MEDIO";
+    motivos.push("🌫️ Rocío nocturno probable");
+  }
+
+  // 🌡️ TEMPERATURA
+  if (temp >= 15 && temp <= 22) {
+    motivos.push("🌡️ Temperatura óptima");
+  } 
+  else if (temp >= 11 && temp <= 25) {
+    motivos.push("🌡️ Temperatura favorable");
+  } 
+  else {
+    motivos.push("Temperatura poco favorable");
+  }
+
+  // ❗ SIN AGUA = SIN RIESGO
+  if (rain === 0 && !rocio) {
+    riesgo = "BAJO";
+  }
+
+  if (motivos.length === 0) {
+    motivos.push("Sin condiciones favorables");
+  }
+
+  return { riesgo, motivos };
+}
+
+// -------- SEMÁFORO ----------
+function pintar(id, riesgo) {
+  const el = document.getElementById(id);
+  el.className = "semaforo";
+
+  if (riesgo === "ALTO") {
+    el.classList.add("rojo");
+    el.innerText = "ALTO";
+  } else if (riesgo === "MEDIO") {
+    el.classList.add("amarillo");
+    el.innerText = "MEDIO";
+  } else {
+    el.classList.add("verde");
+    el.innerText = "BAJO";
+  }
+}
+
+// -------- DATOS ACTUALES ----------
+let riesgoHoy = "BAJO";
+
+fetch(`https://api.ecowitt.net/api/v3/device/real_time?application_key=${APP_KEY}&api_key=${API_KEY}&mac=${MAC}&call_back=all`)
+.then(r => r.json())
+.then(d => {
+
+  let tempF =
+    d?.data?.outdoor?.temperature?.value ??
+    d?.data?.temp_and_humidity?.temperature?.value;
+
+  let hum =
+    d?.data?.outdoor?.humidity?.value ??
+    d?.data?.temp_and_humidity?.humidity?.value;
+
+  let rain =
+    d?.data?.rainfall?.rain_rate?.value ?? 0;
+
+  let temp = (tempF - 32) * 5 / 9;
+
+  document.getElementById("temp").innerText = temp.toFixed(1);
+  document.getElementById("hum").innerText = hum;
+  document.getElementById("rain").innerText = rain;
+
+  let res = calcular(temp, hum, rain);
+  riesgoHoy = res.riesgo;
+
+  pintar("semHoy", riesgoHoy);
+  document.getElementById("exp").innerText = res.motivos.join(" | ");
+});
+
+// -------- PREVISIÓN ----------
+fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_max&timezone=auto`)
+.then(r => r.json())
+.then(d => {
+
+  let temp = (d.daily.temperature_2m_max[1] + d.daily.temperature_2m_min[1]) / 2;
+  let hum = d.daily.relative_humidity_2m_max[1];
+  let rain = d.daily.precipitation_sum[1];
+
+  document.getElementById("mañanaTxt").innerText =
+    `🌡️ ${temp.toFixed(1)}°C | 💧 ${hum}% | 🌧️ ${rain} mm`;
+
+  let res = calcular(temp, hum, rain);
+
+  pintar("semMan", res.riesgo);
+
+  // -------- DECISIÓN ----------
+  let accion = "";
+
+  if (riesgoHoy === "ALTO") {
+    accion = "🔴 TRATAR YA";
+  }
+  else if (res.riesgo === "ALTO") {
+    accion = "🟠 TRATAR HOY (mañana riesgo real)";
+  }
+  else if (riesgoHoy === "MEDIO") {
+    accion = "🟡 VIGILAR";
+  }
+  else {
+    accion = "🟢 SIN RIESGO";
+  }
+
+  document.getElementById("accion").innerText = accion;
+});
+</script>
+
+</body>
+</html>
